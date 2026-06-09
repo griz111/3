@@ -14,47 +14,57 @@
             text-align: center;
             min-height: 100vh;
         }
-        .container { padding: 20px; max-width: 800px; margin: auto; }
-        h1 { text-shadow: 0 0 15px #ffd700; margin-bottom: 10px; }
-        button {
+        .container { padding: 20px; max-width: 900px; margin: auto; }
+        h1 { text-shadow: 0 0 15px #ffd700; }
+        .balance { font-size: 1.5em; margin: 15px 0; }
+        
+        .stake-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 15px;
+            margin: 30px 0;
+        }
+        .stake-btn {
             background: #ffd700;
             color: #1a1a2e;
             border: none;
-            padding: 15px 30px;
-            margin: 10px;
+            padding: 20px 10px;
             font-size: 1.1em;
             cursor: pointer;
             box-shadow: 0 5px 0 #b8860b;
         }
-        button:active { transform: translateY(4px); box-shadow: 0 0 0; }
-        .choices {
-            display: flex;
-            justify-content: center;
-            gap: 40px;
-            margin: 50px 0;
+        .stake-btn:hover { transform: scale(1.05); }
+        .popular::after {
+            content: " 🔥";
+            font-size: 0.8em;
         }
+
+        .choices { display: flex; justify-content: center; gap: 40px; margin: 50px 0; }
         .choice {
             font-size: 5em;
             padding: 20px;
             border: 6px solid #ffd700;
             border-radius: 25px;
             cursor: pointer;
-            transition: 0.2s;
         }
-        .choice:hover { transform: scale(1.15); background: rgba(255,215,0,0.1); }
+        .choice:hover { transform: scale(1.15); }
         #status { font-size: 1.3em; min-height: 80px; margin: 20px; }
-        #coins { font-size: 1.4em; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🪙 КАМЕНЬ НОЖНИЦЫ БУМАГА 🪙</h1>
-        <p>Баланс: <strong id="coins">500</strong> 🪙</p>
+        <div class="balance">Баланс: <strong id="coins">500</strong> 🪙</div>
 
         <div id="menu">
-            <button onclick="makeMove()">Сделать ход</button>
-            <button onclick="findGame()">Найти игру</button>
-            <button onclick="showShop()">Купить монеты</button>
+            <h2>Выберите ставку</h2>
+            <div class="stake-buttons">
+                <button class="stake-btn" onclick="startGame(10)">10 🪙</button>
+                <button class="stake-btn" onclick="startGame(25)">25 🪙</button>
+                <button class="stake-btn popular" onclick="startGame(50)">50 🪙</button>
+                <button class="stake-btn" onclick="startGame(100)">100 🪙</button>
+                <button class="stake-btn" onclick="startGame(250)">250 🪙</button>
+            </div>
         </div>
 
         <div id="gameArea" style="display:none;">
@@ -63,7 +73,7 @@
                 <div class="choice" onclick="makeChoice('scissors')">✂️</div>
                 <div class="choice" onclick="makeChoice('paper')">📄</div>
             </div>
-            <div id="status">Ожидание...</div>
+            <div id="status">Ожидание противника...</div>
             <button onclick="leaveCurrentGame()">Выйти</button>
         </div>
 
@@ -77,166 +87,163 @@
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 
-	<script>
-	const firebaseConfig = {
-		apiKey: "AIzaSyArzncow0uL6BFoo4d5cIXE4snzbK6dVHs",
-		authDomain: "rps-game-73b76.firebaseapp.com",
-		projectId: "rps-game-73b76",
-		storageBucket: "rps-game-73b76.firebasestorage.app",
-		messagingSenderId: "1095954045583",
-		appId: "1:1095954045583:web:3537418e746dd9730beefa"
-	};
+    <script>
+		const firebaseConfig = {
+			apiKey: "AIzaSyArzncow0uL6BFoo4d5cIXE4snzbK6dVHs",
+			authDomain: "rps-game-73b76.firebaseapp.com",
+			projectId: "rps-game-73b76",
+			storageBucket: "rps-game-73b76.firebasestorage.app",
+			messagingSenderId: "1095954045583",
+			appId: "1:1095954045583:web:3537418e746dd9730beefa"
+		};
 
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const auth = firebase.auth();
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
 
-    let userId = null;
-    let currentGameId = null;
-    let isHost = false;
-    let playerCoins = 500;
+        let userId = null;
+        let currentGameId = null;
+        let isHost = false;
+        let currentStake = 0;
+        let playerCoins = 500;
 
-    const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
+        const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
 
-    async function init() {
-        const user = await auth.signInAnonymously();
-        userId = user.user.uid;
-        document.getElementById('coins').textContent = playerCoins;
-    }
+        async function init() {
+            const user = await auth.signInAnonymously();
+            userId = user.user.uid;
+            document.getElementById('coins').textContent = playerCoins;
+        }
 
-    // ==================== СОЗДАТЬ ИГРУ ====================
-    function makeMove() {
-        if (!userId) return alert("Подождите...");
+        // ====================== НАЧАТЬ ИГРУ ======================
+        async function startGame(stake) {
+            if (!userId) return alert("Подождите...");
 
-        isHost = true;
-        currentGameId = 'game_' + Date.now();
+            currentStake = stake;
 
-        db.collection('openGames').doc(currentGameId).set({
-            host: userId,
-            hostChoice: null,
-            guest: null,
-            guestChoice: null,
-            status: 'waiting',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).then(() => {
-            enterGameScreen("Ожидаем противника...");
-        });
-    }
+            // Проверяем баланс
+            if (playerCoins < stake) {
+                return alert(`Недостаточно монет! Нужно ${stake} 🪙`);
+            }
 
-    // ==================== НАЙТИ ИГРУ ====================
-    async function findGame() {
-        if (!userId) return;
-
-        try {
+            // Ищем существующую игру с такой ставкой
             const snapshot = await db.collection('openGames')
                 .where('status', '==', 'waiting')
-                .where('guest', '==', null)           // ← Важное исправление
-                .limit(10)
+                .where('stake', '==', stake)
+                .where('guest', '==', null)
+                .limit(5)
                 .get();
-
-            if (snapshot.empty) {
-                alert("Пока нет доступных игр.\nСоздайте свою!");
-                return;
-            }
 
             for (let doc of snapshot.docs) {
                 const game = doc.data();
                 if (game.host !== userId) {
                     currentGameId = doc.id;
                     isHost = false;
-
-                    await db.collection('openGames').doc(currentGameId).update({
-                        guest: userId
-                    });
-
-                    enterGameScreen("Противник найден! Делайте ход.");
+                    await db.collection('openGames').doc(currentGameId).update({ guest: userId });
+                    enterGameScreen(`Игра на ${stake} 🪙 — противник найден!`);
                     return;
                 }
             }
-            alert("Пока нет доступных игр.");
-        } catch (e) {
-            console.error(e);
-            alert("Ошибка поиска. Попробуйте позже.");
-        }
-    }
 
-    function enterGameScreen(text) {
-        document.getElementById('menu').style.display = 'none';
-        document.getElementById('gameArea').style.display = 'block';
-        document.getElementById('status').textContent = text;
-    }
+            // Если игр нет — создаём новую
+            isHost = true;
+            currentGameId = 'game_' + Date.now();
 
-    function makeChoice(choice) {
-        if (!currentGameId) return;
-
-        const field = isHost ? 'hostChoice' : 'guestChoice';
-        db.collection('openGames').doc(currentGameId).update({ [field]: choice });
-
-        document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
-        document.getElementById('choices').style.display = 'none';
-
-        listenForResult();
-    }
-
-    function listenForResult() {
-        const unsubscribe = db.collection('openGames').doc(currentGameId)
-            .onSnapshot(doc => {
-                const game = doc.data();
-                if (game && game.hostChoice && game.guestChoice) {
-                    unsubscribe();
-                    determineWinner(game.hostChoice, game.guestChoice);
-                }
+            await db.collection('openGames').doc(currentGameId).set({
+                stake: stake,
+                host: userId,
+                hostChoice: null,
+                guest: null,
+                guestChoice: null,
+                status: 'waiting',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
-    }
 
-    function determineWinner(hostCh, guestCh) {
-        let resultText = '';
-        let win = false;
-
-        if (hostCh === guestCh) {
-            resultText = "🤝 НИЧЬЯ!";
-        } else if (
-            (hostCh === 'rock' && guestCh === 'scissors') ||
-            (hostCh === 'scissors' && guestCh === 'paper') ||
-            (hostCh === 'paper' && guestCh === 'rock')
-        ) {
-            win = isHost;
-            resultText = isHost ? "🎉 ВЫ ПОБЕДИЛИ! +50 🪙" : "😢 Вы проиграли";
-        } else {
-            win = !isHost;
-            resultText = isHost ? "😢 Вы проиграли" : "🎉 ВЫ ПОБЕДИЛИ! +50 🪙";
+            enterGameScreen(`Игра на ${stake} 🪙 создана. Ожидаем противника...`);
         }
 
-        if (win) playerCoins += 50;
-        document.getElementById('coins').textContent = playerCoins;
+        function enterGameScreen(text) {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('gameArea').style.display = 'block';
+            document.getElementById('status').textContent = text;
+        }
 
-        document.getElementById('gameArea').style.display = 'none';
-        document.getElementById('resultArea').style.display = 'block';
-        document.getElementById('resultText').innerHTML = resultText;
+        function makeChoice(choice) {
+            if (!currentGameId) return;
 
-        setTimeout(() => {
+            const field = isHost ? 'hostChoice' : 'guestChoice';
+            db.collection('openGames').doc(currentGameId).update({ [field]: choice });
+
+            document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
+            document.getElementById('choices').style.display = 'none';
+
+            listenForResult();
+        }
+
+        function listenForResult() {
+            const unsubscribe = db.collection('openGames').doc(currentGameId)
+                .onSnapshot(doc => {
+                    const game = doc.data();
+                    if (game && game.hostChoice && game.guestChoice) {
+                        unsubscribe();
+                        determineWinner(game);
+                    }
+                });
+        }
+
+        function determineWinner(game) {
+            const hostCh = game.hostChoice;
+            const guestCh = game.guestChoice;
+            let resultText = '';
+            let win = false;
+
+            if (hostCh === guestCh) {
+                resultText = "🤝 НИЧЬЯ! Ставка возвращена.";
+            } else if (
+                (hostCh === 'rock' && guestCh === 'scissors') ||
+                (hostCh === 'scissors' && guestCh === 'paper') ||
+                (hostCh === 'paper' && guestCh === 'rock')
+            ) {
+                win = isHost;
+                resultText = isHost ? `🎉 ПОБЕДА! +${Math.floor(currentStake * 0.95)} 🪙` : "😢 Проигрыш";
+            } else {
+                win = !isHost;
+                resultText = isHost ? "😢 Проигрыш" : `🎉 ПОБЕДА! +${Math.floor(currentStake * 0.95)} 🪙`;
+            }
+
+            if (win) playerCoins += Math.floor(currentStake * 0.95);
+            document.getElementById('coins').textContent = playerCoins;
+
+            document.getElementById('gameArea').style.display = 'none';
+            document.getElementById('resultArea').style.display = 'block';
+            document.getElementById('resultText').innerHTML = resultText;
+
+            setTimeout(() => {
+                if (currentGameId) db.collection('openGames').doc(currentGameId).delete();
+                backToMenu();
+            }, 4000);
+        }
+
+        function leaveCurrentGame() {
             if (currentGameId) db.collection('openGames').doc(currentGameId).delete();
-        }, 4000);
-    }
+            backToMenu();
+        }
 
-    function leaveCurrentGame() {
-        if (currentGameId) db.collection('openGames').doc(currentGameId).delete();
-        backToMenu();
-    }
+        function backToMenu() {
+            currentGameId = null;
+            currentStake = 0;
+            document.getElementById('gameArea').style.display = 'none';
+            document.getElementById('resultArea').style.display = 'none';
+            document.getElementById('menu').style.display = 'block';
+            document.getElementById('choices').style.display = 'flex';
+        }
 
-    function backToMenu() {
-        currentGameId = null;
-        document.getElementById('gameArea').style.display = 'none';
-        document.getElementById('resultArea').style.display = 'none';
-        document.getElementById('menu').style.display = 'block';
-        document.getElementById('choices').style.display = 'flex';
-    }
+        function showShop() {
+            alert("Магазин монет скоро будет доступен!");
+        }
 
-    function showShop() {
-        alert("Магазин монет (в разработке)");
-    }
-
-    init();
-</script>
+        // Запуск
+        init();
+    </script>
 </body>
 </html>
