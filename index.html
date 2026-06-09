@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>КНБ — Золотые Монеты</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #ffd700;
+            font-family: 'Press Start 2P', cursive;
+            text-align: center;
+            min-height: 100vh;
+        }
+        .container { padding: 20px; max-width: 800px; margin: auto; }
+        h1 { text-shadow: 0 0 15px #ffd700; margin-bottom: 10px; }
+        button {
+            background: #ffd700;
+            color: #1a1a2e;
+            border: none;
+            padding: 15px 30px;
+            margin: 10px;
+            font-size: 1.1em;
+            cursor: pointer;
+            box-shadow: 0 5px 0 #b8860b;
+        }
+        button:active { transform: translateY(4px); box-shadow: 0 0 0; }
+        .choices {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin: 50px 0;
+        }
+        .choice {
+            font-size: 5em;
+            padding: 20px;
+            border: 6px solid #ffd700;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .choice:hover { transform: scale(1.15); background: rgba(255,215,0,0.1); }
+        #status { font-size: 1.3em; min-height: 80px; margin: 20px; }
+        #coins { font-size: 1.4em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🪙 КАМЕНЬ НОЖНИЦЫ БУМАГА 🪙</h1>
+        <p>Баланс: <strong id="coins">500</strong> 🪙</p>
+
+        <div id="menu">
+            <button onclick="makeMove()">Сделать ход</button>
+            <button onclick="findGame()">Найти игру</button>
+            <button onclick="showShop()">Купить монеты</button>
+        </div>
+
+        <div id="gameArea" style="display:none;">
+            <div class="choices" id="choices">
+                <div class="choice" onclick="makeChoice('rock')">🪨</div>
+                <div class="choice" onclick="makeChoice('scissors')">✂️</div>
+                <div class="choice" onclick="makeChoice('paper')">📄</div>
+            </div>
+            <div id="status">Ожидание...</div>
+            <button onclick="leaveCurrentGame()">Выйти</button>
+        </div>
+
+        <div id="resultArea" style="display:none;">
+            <h2 id="resultText"></h2>
+            <button onclick="backToMenu()">Играть снова</button>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+    <script>
+		const firebaseConfig = {
+		  apiKey: "AIzaSyArzncow0uL6BFoo4d5cIXE4snzbK6dVHs",
+		  authDomain: "rps-game-73b76.firebaseapp.com",
+		  projectId: "rps-game-73b76",
+		  storageBucket: "rps-game-73b76.firebasestorage.app",
+		  messagingSenderId: "1095954045583",
+		  appId: "1:1095954045583:web:3537418e746dd9730beefa"
+		};
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        let userId = null;
+        let currentGameId = null;
+        let isHost = false;
+        let playerCoins = 500;
+
+        const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
+
+        async function init() {
+            const user = await auth.signInAnonymously();
+            userId = user.user.uid;
+            document.getElementById('coins').textContent = playerCoins;
+        }
+
+        function makeMove() {
+            if (!userId) return;
+            isHost = true;
+            currentGameId = 'game_' + Date.now();
+
+            db.collection('openGames').doc(currentGameId).set({
+                host: userId,
+                hostChoice: null,
+                guest: null,
+                guestChoice: null,
+                status: 'waiting',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            enterGameScreen("Ожидаем противника...");
+        }
+
+        async function findGame() {
+            if (!userId) return;
+
+            const snapshot = await db.collection('openGames')
+                .where('status', '==', 'waiting')
+                .orderBy('createdAt', 'desc')
+                .limit(8)
+                .get();
+
+            for (let doc of snapshot.docs) {
+                const game = doc.data();
+                if (game.host !== userId && !game.guest) {
+                    currentGameId = doc.id;
+                    isHost = false;
+
+                    await db.collection('openGames').doc(currentGameId).update({ guest: userId });
+                    enterGameScreen("Противник найден! Делайте ход.");
+                    return;
+                }
+            }
+            alert("Пока нет доступных игр.\nПопробуйте создать свою!");
+        }
+
+        function enterGameScreen(text) {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('gameArea').style.display = 'block';
+            document.getElementById('status').textContent = text;
+        }
+
+        function makeChoice(choice) {
+            if (!currentGameId) return;
+
+            const field = isHost ? 'hostChoice' : 'guestChoice';
+            db.collection('openGames').doc(currentGameId).update({ [field]: choice });
+
+            document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
+            document.getElementById('choices').style.display = 'none';
+
+            listenForResult();
+        }
+
+        function listenForResult() {
+            const unsubscribe = db.collection('openGames').doc(currentGameId)
+                .onSnapshot(doc => {
+                    const game = doc.data();
+                    if (game?.hostChoice && game?.guestChoice) {
+                        unsubscribe();
+                        determineWinner(game.hostChoice, game.guestChoice);
+                    }
+                });
+        }
+
+        function determineWinner(hostCh, guestCh) {
+            let resultText = '';
+            let win = false;
+
+            if (hostCh === guestCh) {
+                resultText = "🤝 НИЧЬЯ!";
+            } else if (
+                (hostCh === 'rock' && guestCh === 'scissors') ||
+                (hostCh === 'scissors' && guestCh === 'paper') ||
+                (hostCh === 'paper' && guestCh === 'rock')
+            ) {
+                win = isHost;
+                resultText = isHost ? "🎉 ВЫ ПОБЕДИЛИ! +50 🪙" : "😢 Вы проиграли";
+            } else {
+                win = !isHost;
+                resultText = isHost ? "😢 Вы проиграли" : "🎉 ВЫ ПОБЕДИЛИ! +50 🪙";
+            }
+
+            if (win) playerCoins += 50;
+            document.getElementById('coins').textContent = playerCoins;
+
+            document.getElementById('gameArea').style.display = 'none';
+            document.getElementById('resultArea').style.display = 'block';
+            document.getElementById('resultText').innerHTML = resultText;
+
+            setTimeout(() => {
+                if (currentGameId) db.collection('openGames').doc(currentGameId).delete();
+            }, 3500);
+        }
+
+        function leaveCurrentGame() {
+            if (currentGameId) db.collection('openGames').doc(currentGameId).delete();
+            backToMenu();
+        }
+
+        function backToMenu() {
+            currentGameId = null;
+            document.getElementById('gameArea').style.display = 'none';
+            document.getElementById('resultArea').style.display = 'none';
+            document.getElementById('menu').style.display = 'block';
+            document.getElementById('choices').style.display = 'flex';
+        }
+
+        function showShop() {
+            alert("Магазин монет\n\nЗдесь в будущем будет YooKassa / Robokassa");
+        }
+
+        // Старт
+        init();
+    </script>
+</body>
+</html>
