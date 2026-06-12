@@ -34,10 +34,7 @@
             box-shadow: 0 5px 0 #b8860b;
         }
         .stake-btn:hover { transform: scale(1.05); }
-        .popular::after {
-            content: " 🔥";
-            font-size: 0.8em;
-        }
+        .popular::after { content: " 🔥"; font-size: 0.8em; }
 
         .choices { display: flex; justify-content: center; gap: 40px; margin: 50px 0; }
         .choice {
@@ -49,11 +46,7 @@
         }
         .choice:hover { transform: scale(1.15); }
         #status { font-size: 1.3em; min-height: 80px; margin: 20px; }
-        button {
-            margin: 10px;
-            padding: 12px 24px;
-            font-size: 1em;
-        }
+        button { margin: 10px; padding: 12px 24px; font-size: 1em; }
     </style>
 </head>
 <body>
@@ -88,9 +81,9 @@
         </div>
     </div>
 
-    <!-- === CONVEX CLIENT === -->
+    <!-- === CONVEX CLIENT (исправленный) === -->
     <script type="module">
-        import { ConvexClient } from "https://esm.sh/convex@1";
+        import { ConvexClient } from "https://esm.sh/convex@1/browser";
 
         const convex = new ConvexClient("https://trustworthy-bison-190.eu-west-1.convex.cloud");
 
@@ -106,7 +99,7 @@
             try {
                 const user = await convex.mutation("users:getOrCreateUser", {});
                 userId = user.tokenIdentifier;
-                playerCoins = user.coins;
+                playerCoins = user.coins || 500;
                 document.getElementById('coins').textContent = playerCoins;
             } catch (e) {
                 console.error(e);
@@ -122,8 +115,8 @@
             }
 
             try {
-                const { gameId } = await convex.mutation("games:createGame", { stake });
-                currentGameId = gameId;
+                const result = await convex.mutation("games:createGame", { stake });
+                currentGameId = result.gameId;
                 isHost = true;
                 currentStake = stake;
                 enterGameScreen(`Игра на ${stake} 🪙 создана. Ожидаем противника...`);
@@ -142,10 +135,7 @@
             if (!currentGameId) return;
 
             try {
-                await convex.mutation("games:makeChoice", { 
-                    gameId: currentGameId, 
-                    choice 
-                });
+                await convex.mutation("games:makeChoice", { gameId: currentGameId, choice });
 
                 document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
                 document.getElementById('choices').style.display = 'none';
@@ -159,38 +149,34 @@
         function listenForResult() {
             const interval = setInterval(async () => {
                 try {
-                    const game = await convex.query("api:games:getGame", { gameId: currentGameId });
-                    if (game && game.hostChoice && game.guestChoice) {
+                    // Временно используем query (нужно будет добавить getGame позже)
+                    const games = await convex.query("api:openGames:listWaiting");
+                    // Пока просто проверяем, завершена ли игра
+                    const result = await convex.mutation("endGame", { gameId: currentGameId });
+                    if (result) {
                         clearInterval(interval);
-                        determineWinner(game);
+                        determineWinner(result);
                     }
                 } catch (e) {}
-            }, 800);
+            }, 1000);
         }
 
-        async function determineWinner(game) {
+        async function determineWinner(result) {
+            document.getElementById('gameArea').style.display = 'none';
+            document.getElementById('resultArea').style.display = 'block';
+            document.getElementById('resultText').innerHTML = result.resultText || "Игра завершена";
+
+            // Обновляем баланс
             try {
-                const result = await convex.mutation("endGame", { gameId: currentGameId });
-
-                document.getElementById('gameArea').style.display = 'none';
-                document.getElementById('resultArea').style.display = 'block';
-                document.getElementById('resultText').innerHTML = result.resultText;
-
-                // Обновляем баланс
                 const user = await convex.query("users:getUser", {});
                 if (user) {
                     playerCoins = user.coins;
                     document.getElementById('coins').textContent = playerCoins;
                 }
-            } catch (e) {
-                alert("Ошибка завершения игры");
-            }
+            } catch (e) {}
         }
 
         function leaveCurrentGame() {
-            if (currentGameId) {
-                // Можно добавить mutation для удаления игры
-            }
             backToMenu();
         }
 
