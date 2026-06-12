@@ -49,6 +49,11 @@
         }
         .choice:hover { transform: scale(1.15); }
         #status { font-size: 1.3em; min-height: 80px; margin: 20px; }
+        button {
+            margin: 10px;
+            padding: 12px 24px;
+            font-size: 1em;
+        }
     </style>
 </head>
 <body>
@@ -83,83 +88,48 @@
         </div>
     </div>
 
-    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <!-- === CONVEX CLIENT === -->
+    <script type="module">
+        import { ConvexClient } from "https://esm.sh/convex@1";
 
-    <script>
-		const firebaseConfig = {
-			apiKey: "AIzaSyArzncow0uL6BFoo4d5cIXE4snzbK6dVHs",
-			authDomain: "rps-game-73b76.firebaseapp.com",
-			projectId: "rps-game-73b76",
-			storageBucket: "rps-game-73b76.firebasestorage.app",
-			messagingSenderId: "1095954045583",
-			appId: "1:1095954045583:web:3537418e746dd9730beefa"
-		};
-
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        const auth = firebase.auth();
+        const convex = new ConvexClient("https://trustworthy-bison-190.eu-west-1.convex.cloud");
 
         let userId = null;
+        let playerCoins = 500;
         let currentGameId = null;
         let isHost = false;
         let currentStake = 0;
-        let playerCoins = 500;
 
         const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
 
-        async function init() {
-            const user = await auth.signInAnonymously();
-            userId = user.user.uid;
-            document.getElementById('coins').textContent = playerCoins;
+        async function initUser() {
+            try {
+                const user = await convex.mutation("users:getOrCreateUser", {});
+                userId = user.tokenIdentifier;
+                playerCoins = user.coins;
+                document.getElementById('coins').textContent = playerCoins;
+            } catch (e) {
+                console.error(e);
+                alert("Ошибка подключения к серверу");
+            }
         }
 
-        // ====================== НАЧАТЬ ИГРУ ======================
         async function startGame(stake) {
-            if (!userId) return alert("Подождите...");
+            if (!userId) return alert("Подождите, идёт подключение...");
 
-            currentStake = stake;
-
-            // Проверяем баланс
             if (playerCoins < stake) {
                 return alert(`Недостаточно монет! Нужно ${stake} 🪙`);
             }
 
-            // Ищем существующую игру с такой ставкой
-            const snapshot = await db.collection('openGames')
-                .where('status', '==', 'waiting')
-                .where('stake', '==', stake)
-                .where('guest', '==', null)
-                .limit(5)
-                .get();
-
-            for (let doc of snapshot.docs) {
-                const game = doc.data();
-                if (game.host !== userId) {
-                    currentGameId = doc.id;
-                    isHost = false;
-                    await db.collection('openGames').doc(currentGameId).update({ guest: userId });
-                    enterGameScreen(`Игра на ${stake} 🪙 — противник найден!`);
-                    return;
-                }
+            try {
+                const { gameId } = await convex.mutation("games:createGame", { stake });
+                currentGameId = gameId;
+                isHost = true;
+                currentStake = stake;
+                enterGameScreen(`Игра на ${stake} 🪙 создана. Ожидаем противника...`);
+            } catch (error) {
+                alert(error.message || "Не удалось создать игру");
             }
-
-            // Если игр нет — создаём новую
-            isHost = true;
-            currentGameId = 'game_' + Date.now();
-
-            await db.collection('openGames').doc(currentGameId).set({
-                stake: stake,
-                host: userId,
-                hostChoice: null,
-                guest: null,
-                guestChoice: null,
-                status: 'waiting',
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            enterGameScreen(`Игра на ${stake} 🪙 создана. Ожидаем противника...`);
         }
 
         function enterGameScreen(text) {
@@ -168,64 +138,59 @@
             document.getElementById('status').textContent = text;
         }
 
-        function makeChoice(choice) {
+        async function makeChoice(choice) {
             if (!currentGameId) return;
 
-            const field = isHost ? 'hostChoice' : 'guestChoice';
-            db.collection('openGames').doc(currentGameId).update({ [field]: choice });
+            try {
+                await convex.mutation("games:makeChoice", { 
+                    gameId: currentGameId, 
+                    choice 
+                });
 
-            document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
-            document.getElementById('choices').style.display = 'none';
+                document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
+                document.getElementById('choices').style.display = 'none';
 
-            listenForResult();
+                listenForResult();
+            } catch (error) {
+                alert(error.message || "Ошибка хода");
+            }
         }
 
         function listenForResult() {
-            const unsubscribe = db.collection('openGames').doc(currentGameId)
-                .onSnapshot(doc => {
-                    const game = doc.data();
+            const interval = setInterval(async () => {
+                try {
+                    const game = await convex.query("api:games:getGame", { gameId: currentGameId });
                     if (game && game.hostChoice && game.guestChoice) {
-                        unsubscribe();
+                        clearInterval(interval);
                         determineWinner(game);
                     }
-                });
+                } catch (e) {}
+            }, 800);
         }
 
-        function determineWinner(game) {
-            const hostCh = game.hostChoice;
-            const guestCh = game.guestChoice;
-            let resultText = '';
-            let win = false;
+        async function determineWinner(game) {
+            try {
+                const result = await convex.mutation("endGame", { gameId: currentGameId });
 
-            if (hostCh === guestCh) {
-                resultText = "🤝 НИЧЬЯ! Ставка возвращена.";
-            } else if (
-                (hostCh === 'rock' && guestCh === 'scissors') ||
-                (hostCh === 'scissors' && guestCh === 'paper') ||
-                (hostCh === 'paper' && guestCh === 'rock')
-            ) {
-                win = isHost;
-                resultText = isHost ? `🎉 ПОБЕДА! +${Math.floor(currentStake * 0.95)} 🪙` : "😢 Проигрыш";
-            } else {
-                win = !isHost;
-                resultText = isHost ? "😢 Проигрыш" : `🎉 ПОБЕДА! +${Math.floor(currentStake * 0.95)} 🪙`;
+                document.getElementById('gameArea').style.display = 'none';
+                document.getElementById('resultArea').style.display = 'block';
+                document.getElementById('resultText').innerHTML = result.resultText;
+
+                // Обновляем баланс
+                const user = await convex.query("users:getUser", {});
+                if (user) {
+                    playerCoins = user.coins;
+                    document.getElementById('coins').textContent = playerCoins;
+                }
+            } catch (e) {
+                alert("Ошибка завершения игры");
             }
-
-            if (win) playerCoins += Math.floor(currentStake * 0.95);
-            document.getElementById('coins').textContent = playerCoins;
-
-            document.getElementById('gameArea').style.display = 'none';
-            document.getElementById('resultArea').style.display = 'block';
-            document.getElementById('resultText').innerHTML = resultText;
-
-            setTimeout(() => {
-                if (currentGameId) db.collection('openGames').doc(currentGameId).delete();
-                backToMenu();
-            }, 4000);
         }
 
         function leaveCurrentGame() {
-            if (currentGameId) db.collection('openGames').doc(currentGameId).delete();
+            if (currentGameId) {
+                // Можно добавить mutation для удаления игры
+            }
             backToMenu();
         }
 
@@ -238,12 +203,8 @@
             document.getElementById('choices').style.display = 'flex';
         }
 
-        function showShop() {
-            alert("Магазин монет скоро будет доступен!");
-        }
-
         // Запуск
-        init();
+        initUser();
     </script>
 </body>
 </html>
