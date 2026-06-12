@@ -66,7 +66,6 @@
 
     const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
 
-    // Глобальные функции для onclick
     window.startGame = startGame;
     window.makeChoice = makeChoice;
     window.leaveCurrentGame = leaveCurrentGame;
@@ -120,7 +119,7 @@
     function listenForResult() {
         const interval = setInterval(async () => {
             try {
-                const result = await convex.mutation("endGame", { gameId: currentGameId });
+                const result = await convex.mutation("endGame:endGame", { gameId: currentGameId });
                 if (result && result.resultText) {
                     clearInterval(interval);
                     document.getElementById('gameArea').style.display = 'none';
@@ -133,7 +132,9 @@
                         document.getElementById('coins').textContent = playerCoins;
                     }
                 }
-            } catch (e) {}
+            } catch (e) {
+                // Ещё не оба игрока сделали выбор — ждём
+            }
         }, 1000);
     }
 
@@ -147,8 +148,7 @@
         document.getElementById('choices').style.display = 'flex';
     }
 
-    // Запуск
     initUser();
-</script>
+    </script>
 </body>
 </html>
