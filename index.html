@@ -54,104 +54,101 @@
     </div>
 
     <script type="module">
-        import { ConvexClient } from "https://esm.sh/convex@1/browser";
+    import { ConvexClient } from "https://esm.sh/convex@1/browser";
 
-        const convex = new ConvexClient("https://trustworthy-bison-190.eu-west-1.convex.cloud");
+    const convex = new ConvexClient("https://trustworthy-bison-190.eu-west-1.convex.cloud");
 
-        let userId = null;
-        let playerCoins = 500;
-        let currentGameId = null;
-        let isHost = false;
-        let currentStake = 0;
+    let userId = null;
+    let playerCoins = 500;
+    let currentGameId = null;
+    let isHost = false;
+    let currentStake = 0;
 
-        const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
+    const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
 
-        // Делаем функции глобальными
-        window.startGame = startGame;
-        window.makeChoice = makeChoice;
-        window.leaveCurrentGame = leaveCurrentGame;
-        window.backToMenu = backToMenu;
+    // Глобальные функции для onclick
+    window.startGame = startGame;
+    window.makeChoice = makeChoice;
+    window.leaveCurrentGame = leaveCurrentGame;
+    window.backToMenu = backToMenu;
 
-        async function initUser() {
+    async function initUser() {
+        try {
+            const user = await convex.mutation("users:getOrCreateUser", {});
+            userId = user.tokenIdentifier;
+            playerCoins = user.coins || 500;
+            document.getElementById('coins').textContent = playerCoins;
+            console.log("✅ Пользователь создан:", userId);
+        } catch (e) {
+            console.error(e);
+            alert("Ошибка подключения");
+        }
+    }
+
+    async function startGame(stake) {
+        if (playerCoins < stake) return alert(`Недостаточно монет! Нужно ${stake} 🪙`);
+
+        try {
+            const result = await convex.mutation("games:createGame", { stake });
+            currentGameId = result.gameId;
+            isHost = true;
+            currentStake = stake;
+            enterGameScreen(`Игра на ${stake} 🪙 создана. Ожидаем противника...`);
+        } catch (error) {
+            alert(error.message || "Не удалось создать игру");
+        }
+    }
+
+    function enterGameScreen(text) {
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('gameArea').style.display = 'block';
+        document.getElementById('status').textContent = text;
+    }
+
+    async function makeChoice(choice) {
+        if (!currentGameId) return;
+        try {
+            await convex.mutation("games:makeChoice", { gameId: currentGameId, choice });
+            document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
+            document.getElementById('choices').style.display = 'none';
+            listenForResult();
+        } catch (error) {
+            alert(error.message || "Ошибка хода");
+        }
+    }
+
+    function listenForResult() {
+        const interval = setInterval(async () => {
             try {
-                const user = await convex.mutation("users:getOrCreateUser", {});
-                userId = user.tokenIdentifier;
-                playerCoins = user.coins || 500;
-                document.getElementById('coins').textContent = playerCoins;
-            } catch (e) {
-                console.error(e);
-                alert("Ошибка подключения к серверу");
-            }
-        }
+                const result = await convex.mutation("endGame", { gameId: currentGameId });
+                if (result && result.resultText) {
+                    clearInterval(interval);
+                    document.getElementById('gameArea').style.display = 'none';
+                    document.getElementById('resultArea').style.display = 'block';
+                    document.getElementById('resultText').innerHTML = result.resultText;
 
-        async function startGame(stake) {
-            if (!userId) return alert("Подождите, идёт подключение...");
-            if (playerCoins < stake) return alert(`Недостаточно монет! Нужно ${stake} 🪙`);
-
-            try {
-                const result = await convex.mutation("games:createGame", { stake });
-                currentGameId = result.gameId;
-                isHost = true;
-                currentStake = stake;
-                enterGameScreen(`Игра на ${stake} 🪙 создана. Ожидаем противника...`);
-            } catch (error) {
-                alert(error.message || "Не удалось создать игру");
-            }
-        }
-
-        function enterGameScreen(text) {
-            document.getElementById('menu').style.display = 'none';
-            document.getElementById('gameArea').style.display = 'block';
-            document.getElementById('status').textContent = text;
-        }
-
-        async function makeChoice(choice) {
-            if (!currentGameId) return;
-            try {
-                await convex.mutation("games:makeChoice", { gameId: currentGameId, choice });
-                document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
-                document.getElementById('choices').style.display = 'none';
-                listenForResult();
-            } catch (error) {
-                alert(error.message || "Ошибка хода");
-            }
-        }
-
-        function listenForResult() {
-            const interval = setInterval(async () => {
-                try {
-                    const result = await convex.mutation("endGame", { gameId: currentGameId });
-                    if (result && result.resultText) {
-                        clearInterval(interval);
-                        document.getElementById('gameArea').style.display = 'none';
-                        document.getElementById('resultArea').style.display = 'block';
-                        document.getElementById('resultText').innerHTML = result.resultText;
-
-                        const user = await convex.query("users:getUser", {});
-                        if (user) {
-                            playerCoins = user.coins;
-                            document.getElementById('coins').textContent = playerCoins;
-                        }
+                    const user = await convex.query("users:getUser", {});
+                    if (user) {
+                        playerCoins = user.coins;
+                        document.getElementById('coins').textContent = playerCoins;
                     }
-                } catch (e) {}
-            }, 1200);
-        }
+                }
+            } catch (e) {}
+        }, 1000);
+    }
 
-        function leaveCurrentGame() {
-            backToMenu();
-        }
+    function leaveCurrentGame() { backToMenu(); }
 
-        function backToMenu() {
-            currentGameId = null;
-            currentStake = 0;
-            document.getElementById('gameArea').style.display = 'none';
-            document.getElementById('resultArea').style.display = 'none';
-            document.getElementById('menu').style.display = 'block';
-            document.getElementById('choices').style.display = 'flex';
-        }
+    function backToMenu() {
+        currentGameId = null;
+        document.getElementById('gameArea').style.display = 'none';
+        document.getElementById('resultArea').style.display = 'none';
+        document.getElementById('menu').style.display = 'block';
+        document.getElementById('choices').style.display = 'flex';
+    }
 
-        // Запуск
-        initUser();
-    </script>
+    // Запуск
+    initUser();
+</script>
 </body>
 </html>
