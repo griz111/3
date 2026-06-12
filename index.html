@@ -6,44 +6,16 @@
     <title>КНБ — Золотые Монеты</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-        body {
-            margin: 0;
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            color: #ffd700;
-            font-family: 'Press Start 2P', cursive;
-            text-align: center;
-            min-height: 100vh;
-        }
+        body { margin: 0; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); color: #ffd700; font-family: 'Press Start 2P', cursive; text-align: center; min-height: 100vh; }
         .container { padding: 20px; max-width: 900px; margin: auto; }
         h1 { text-shadow: 0 0 15px #ffd700; }
         .balance { font-size: 1.5em; margin: 15px 0; }
-        
-        .stake-buttons {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 15px;
-            margin: 30px 0;
-        }
-        .stake-btn {
-            background: #ffd700;
-            color: #1a1a2e;
-            border: none;
-            padding: 20px 10px;
-            font-size: 1.1em;
-            cursor: pointer;
-            box-shadow: 0 5px 0 #b8860b;
-        }
+        .stake-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin: 30px 0; }
+        .stake-btn { background: #ffd700; color: #1a1a2e; border: none; padding: 20px 10px; font-size: 1.1em; cursor: pointer; box-shadow: 0 5px 0 #b8860b; }
         .stake-btn:hover { transform: scale(1.05); }
         .popular::after { content: " 🔥"; font-size: 0.8em; }
-
         .choices { display: flex; justify-content: center; gap: 40px; margin: 50px 0; }
-        .choice {
-            font-size: 5em;
-            padding: 20px;
-            border: 6px solid #ffd700;
-            border-radius: 25px;
-            cursor: pointer;
-        }
+        .choice { font-size: 5em; padding: 20px; border: 6px solid #ffd700; border-radius: 25px; cursor: pointer; }
         .choice:hover { transform: scale(1.15); }
         #status { font-size: 1.3em; min-height: 80px; margin: 20px; }
         button { margin: 10px; padding: 12px 24px; font-size: 1em; }
@@ -81,7 +53,6 @@
         </div>
     </div>
 
-    <!-- === CONVEX CLIENT (исправленный) === -->
     <script type="module">
         import { ConvexClient } from "https://esm.sh/convex@1/browser";
 
@@ -94,6 +65,12 @@
         let currentStake = 0;
 
         const choicesMap = { rock: '🪨', scissors: '✂️', paper: '📄' };
+
+        // Делаем функции глобальными
+        window.startGame = startGame;
+        window.makeChoice = makeChoice;
+        window.leaveCurrentGame = leaveCurrentGame;
+        window.backToMenu = backToMenu;
 
         async function initUser() {
             try {
@@ -109,10 +86,7 @@
 
         async function startGame(stake) {
             if (!userId) return alert("Подождите, идёт подключение...");
-
-            if (playerCoins < stake) {
-                return alert(`Недостаточно монет! Нужно ${stake} 🪙`);
-            }
+            if (playerCoins < stake) return alert(`Недостаточно монет! Нужно ${stake} 🪙`);
 
             try {
                 const result = await convex.mutation("games:createGame", { stake });
@@ -133,13 +107,10 @@
 
         async function makeChoice(choice) {
             if (!currentGameId) return;
-
             try {
                 await convex.mutation("games:makeChoice", { gameId: currentGameId, choice });
-
                 document.getElementById('status').innerHTML = `Вы выбрали: ${choicesMap[choice]}<br>Ожидаем противника...`;
                 document.getElementById('choices').style.display = 'none';
-
                 listenForResult();
             } catch (error) {
                 alert(error.message || "Ошибка хода");
@@ -149,31 +120,21 @@
         function listenForResult() {
             const interval = setInterval(async () => {
                 try {
-                    // Временно используем query (нужно будет добавить getGame позже)
-                    const games = await convex.query("api:openGames:listWaiting");
-                    // Пока просто проверяем, завершена ли игра
                     const result = await convex.mutation("endGame", { gameId: currentGameId });
-                    if (result) {
+                    if (result && result.resultText) {
                         clearInterval(interval);
-                        determineWinner(result);
+                        document.getElementById('gameArea').style.display = 'none';
+                        document.getElementById('resultArea').style.display = 'block';
+                        document.getElementById('resultText').innerHTML = result.resultText;
+
+                        const user = await convex.query("users:getUser", {});
+                        if (user) {
+                            playerCoins = user.coins;
+                            document.getElementById('coins').textContent = playerCoins;
+                        }
                     }
                 } catch (e) {}
-            }, 1000);
-        }
-
-        async function determineWinner(result) {
-            document.getElementById('gameArea').style.display = 'none';
-            document.getElementById('resultArea').style.display = 'block';
-            document.getElementById('resultText').innerHTML = result.resultText || "Игра завершена";
-
-            // Обновляем баланс
-            try {
-                const user = await convex.query("users:getUser", {});
-                if (user) {
-                    playerCoins = user.coins;
-                    document.getElementById('coins').textContent = playerCoins;
-                }
-            } catch (e) {}
+            }, 1200);
         }
 
         function leaveCurrentGame() {
